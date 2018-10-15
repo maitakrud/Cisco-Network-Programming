@@ -12,7 +12,7 @@ b64Val = base64.b64encode(usrPass)
 b64ValDecode = b64Val.decode('utf-8')
 
 token = requests.post(url,
-                headers={"Authorization": "Basic %s" % b64ValDecode}, verify=False)
+                headers={"Authorization": "Basic %s" % b64ValDecode, "Content-type": "application/json",}, verify=False)
 tokenJson = json.loads(token.text)
 tokenString = tokenJson['Token']
-#print(tokenString)
+print(tokenString)
