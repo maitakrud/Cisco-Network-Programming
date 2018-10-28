@@ -14,27 +14,6 @@ headers = {
               'content-type': "application/json",
               'x-auth-token': ""
           }
-"""
-parser = argparse.ArgumentParser(description = "Path Trace from DNAC API")
-parser.add_argument('-s', '--source', type=str, metavar='', required=True, help="Source IP Address")
-parser.add_argument('-d', '--destination', type=str, metavar='', required=True, help="Destination IP Address")
-args = parser.parse_args()
-group = parser.add_mutually_exclusive_group()
-group.add_argument('de', '-- detail', action = 'store_true', hel="Get path detail")
-
-network_device_url = "https://10.20.99.22/api/v1/network-device"
-interface_url = "https://10.20.99.22/api/v1/interface"
-flow_analysis_url = "https://10.20.99.22/api/v1/flow-analysis"
-
-network_device_respone = requests.get(network_device_url,
-                headers={"X-Auth-Token": "%s" % tokenString, "Content-type": "application/json"}, verify=False)
-print(network_device_respone.text)
-
-body = {"destIP": "10.20.99.24", "sourceIP": "10.123.0.7"}
-pathTrace_response = requests.post(flow_analysis_url, headers={"X-Auth-Token": "%s" % tokenString, "Content-type": "application/json"}, verify=False,
-                                      json=body)
-print(pathTrace_response.text)
-"""
 
 def getToken(dnacAddress, username, password):
     """
@@ -87,20 +66,82 @@ def host_detail(dnacAddress, accessToken, ipAddress):
     #Return host detail in json format
     return host_detail_response.json()["response"]
 
-def print_host_details (host):
+def print_host_details (host, dnacAddress, accessToken):
 
     if 'role' not in host.keys():
-        print("This is Host not network device")
+
+        if host["hostType"] == "wired":
+
+            url = "https://{}/api/v1/network-device".format(dnacAddress)
+            headers["x-auth-token"] = accessToken
+            url += "/{}".format(host['connectedNetworkDeviceId'])
+            connected_device = requests.get(url, headers=headers, verify=False)
+            connected_device = connected_device.json()["response"]
+
+            url = "https://{}/api/v1/interface".format(dnacAddress)
+            headers["x-auth-token"] = accessToken
+            url += "/{}".format(host['connectedInterfaceId'])
+            connected_interface = requests.get(url, headers=headers, verify=False)
+            connected_interface = connected_interface.json()["response"]
+
+            print("This is Host not network device")
+            print("Device IP Address: {}".format(host['hostIp']))
+            print("Device Mac Address: {}".format(host['hostMac']))
+            print("Connected Type: {}".format(host['hostType']))
+            print("Connected Device Hostname: {}".format(host['connectedNetworkDeviceName']))
+            print("Connected Device IP Address: {}".format(host['connectedNetworkDeviceIpAddress']))
+            print("Connected Device Type: {}".format(connected_device['type']))
+            print("Connected Device Interface: {}".format(host['connectedInterfaceName']))
+            print("Connected Device Interface Speed: {}".format(connected_interface['speed']))
+            print("Connected Device Interface Duplex: {}".format(connected_interface['duplex']))
+            print("Connected Device Interface Description: {}".format(connected_interface['description']))
+            print("Connected Device Interface Port mode: {}".format(connected_interface['portMode']))
+            print("Connected Device Interface Port type: {}".format(connected_interface['portType']))
+            print("Connected Device Interface VLAN ID: {}".format(connected_interface['vlanId']))
+            print("Connected Device Interface Native VLAN ID: {}".format(connected_interface['nativeVlanId']))
+
+        else:
+            print("Wireless")
+
     if 'role' in host.keys():
-        print("This is Network Device not Host")
+        print("Device Hostname: {}".format(host['hostname']))
+        print("Device Type: {}".format(host['type']))
+        print("Device Family: {}".format(host['family']))
+        print("Decice Role: {}".format(host['role']))
+        print("Management IP Address: {}".format(host['managementIpAddress']))
+        print("Mac Address: {}".format(host['macAddress']))
+        print("Software Type: {}".format(host['softwareType']))
+        print("Software Version: {}".format(host['softwareVersion']))
+        print("Serial Number: {}".format(host['serialNumber']))
+        if host['associatedWlcIp'] != '':
+            print("Associated Wireless LAN Controller: {}".format(host['associatedWlcIp']))
+        print("---------------------------------")
 
 # The Program Start here.
 if __name__ == '__main__':
 
-    dnac_ipAddress = input("Please Enter DNAC IP Address : ")
-    dnac_username = input("Please Enter DNAC Username : ")
-    dnac_password = getpass.getpass("Please Enter DNAC Password : ")
-    token = getToken(dnac_ipAddress, dnac_username, dnac_password)
-    source_host_detail = host_detail(dnac_ipAddress, token, "1.20.151.254")
-    verify_source_host = verify_host(source_host_detail, "1.20.151.254")
-    print_source_detail = print_host_details(source_host_detail[0])
+    parser = argparse.ArgumentParser(description = "Path Trace from DNAC API")
+    parser.add_argument('-s', '--source', type=str, metavar='', required=True, help="Source IP Address")
+    parser.add_argument('-d', '--destination', type=str, metavar='', required=True, help="Destination IP Address")
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument('-de', '--detail', action = 'store_true', help="Get path detail")
+    args = parser.parse_args()
+
+    if args.detail:
+        dnac_ipAddress = input("Please Enter DNAC IP Address : ")
+        dnac_username = input("Please Enter DNAC Username : ")
+        dnac_password = getpass.getpass("Please Enter DNAC Password : ")
+        token = getToken(dnac_ipAddress, dnac_username, dnac_password)
+        source_host_detail = host_detail(dnac_ipAddress, token, args.source)
+        verify_source_host = verify_host(source_host_detail, args.source)
+        print("---------------------------------")
+        print("Source Detail")
+        print_source_detail = print_host_details(source_host_detail[0], dnac_ipAddress, token)
+        print("")
+        print("---------------------------------")
+        print("Destination Detail")
+        destination_host_detail = host_detail(dnac_ipAddress, token, args.destination)
+        verify_destination_host = verify_host(source_host_detail, args.destination)
+        print_destination_detail = print_host_details(destination_host_detail[0], dnac_ipAddress, token)
+    else:
+        print("EZ")
