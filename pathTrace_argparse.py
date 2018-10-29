@@ -7,6 +7,7 @@ import urllib3
 import getpass
 from http import HTTPStatus
 from requests.auth import HTTPBasicAuth
+from time import sleep
 
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
@@ -117,6 +118,87 @@ def print_host_details (host, dnacAddress, accessToken):
             print("Associated Wireless LAN Controller: {}".format(host['associatedWlcIp']))
         print("---------------------------------")
 
+def run_flow_analysis (dnacAddress, accessToken, source_ip, destination_ip):
+
+    url = "https://{}/api/v1/flow-analysis".format(dnacAddress)
+    headers["x-auth-token"] = accessToken
+    body = {"destIP": destination_ip, "sourceIP": source_ip}
+    response = requests.post(url, headers=headers, verify=False,
+                                      json=body)
+
+    # Verify successfully initiated.
+    if response.status_code != 202:
+        print("Error: Flow Analysis Initiation Failed")
+        print(initiate_response.text)
+        sys.exit(1)
+
+    # Check status of analysis and wait until completed
+    flowAnalysisId = response.json()["response"]["flowAnalysisId"]
+    detail_url = url + "/{}".format(flowAnalysisId)
+    detail_response = requests.get(detail_url, headers=headers, verify=False)
+    while not detail_response.json()["response"]["request"]["status"] == "COMPLETED":  # noqa: E501
+        print("Flow analysis not complete yet, waiting 5 seconds")
+        sleep(5)
+        detail_response = requests.get(detail_url, headers=headers,
+                                       verify=False)
+
+    # Return the flow analysis details
+    return detail_response.json()["response"]
+
+def print_flow_analysis(dnacAddress, accessToken, flow_detail):
+
+    hops_number = flow_detail['networkElementsInfo']
+    print("Total Hops number: {}".format(len(hops_number)))
+    print()
+    print("---------------------------------")
+    print("Flow Detail")
+    for i, hop in enumerate(hops_number):
+        print("************************")
+        if 'name' not in hops_number[i].keys():
+            print("The First Hops is Host")
+            print("Host IP: {}".format(hops_number[i]["ip"]))
+            print("Host Type: {}".format(hops_number[i]["type"]))
+
+        else:
+            print("Hop {}: Network Device Name : {}".format(i+1, hops_number[i]["name"]))
+            # If the hop is "UNKNOWN" continue along
+            if hops_number[i]["name"] == "UNKNOWN":
+                print()
+                continue
+                print("Device IP: {}".format(hops_number[i]["ip"]))
+                print("Device Role: {}".format(hops_number[i]["type"]))
+
+        # If type is an Access Point, skip interface details
+            if hops_number[i]["type"] == "Unified AP":
+                continue
+
+                print()
+
+            ingress_url = "https://{}/api/v1/interface".format(dnacAddress)
+            headers["x-auth-token"] = accessToken
+            ingress_url += "/{}".format(hops_number[i]["ingressInterface"]["physicalInterface"]["id"])
+            ingress_interface = requests.get(ingress_url, headers=headers, verify=False)
+            ingress_interface = ingress_interface.json()["response"]
+
+            print("Ingress Interface")
+            print("---------------------------------")
+            print(ingress_interface)
+
+            if 'egressInterface' in hops_number[i].keys():
+                egress_url = "https://{}/api/v1/interface".format(dnacAddress)
+                headers["x-auth-token"] = accessToken
+                egress_url += "/{}".format(hops_number[i]["egressInterface"]["physicalInterface"]["id"])
+                egress_interface = requests.get(ingress_url, headers=headers, verify=False)
+                egress_interface = egress_interface.json()["response"]
+
+                print("Egress Interface")
+                print("---------------------------------")
+                print(egress_interface)
+
+                print()
+            else:
+                print("Path Trace reach Destination device")
+
 # The Program Start here.
 if __name__ == '__main__':
 
@@ -143,5 +225,9 @@ if __name__ == '__main__':
         destination_host_detail = host_detail(dnac_ipAddress, token, args.destination)
         verify_destination_host = verify_host(source_host_detail, args.destination)
         print_destination_detail = print_host_details(destination_host_detail[0], dnac_ipAddress, token)
+
+        start_flow_analysis = run_flow_analysis(dnac_ipAddress, token, args.source, args.destination)
+        print_flow_analysis_details = print_flow_analysis(dnac_ipAddress, token, start_flow_analysis)
+
     else:
         print("EZ")
