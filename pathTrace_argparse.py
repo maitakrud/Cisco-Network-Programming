@@ -71,13 +71,13 @@ def print_host_details (host, dnacAddress, accessToken):
 
     if 'role' not in host.keys():
 
-        if host["hostType"] == "wired":
+        url = "https://{}/api/v1/network-device".format(dnacAddress)
+        headers["x-auth-token"] = accessToken
+        url += "/{}".format(host['connectedNetworkDeviceId'])
+        connected_device = requests.get(url, headers=headers, verify=False)
+        connected_device = connected_device.json()["response"]
 
-            url = "https://{}/api/v1/network-device".format(dnacAddress)
-            headers["x-auth-token"] = accessToken
-            url += "/{}".format(host['connectedNetworkDeviceId'])
-            connected_device = requests.get(url, headers=headers, verify=False)
-            connected_device = connected_device.json()["response"]
+        if host["hostType"] == "wired":
 
             url = "https://{}/api/v1/interface".format(dnacAddress)
             headers["x-auth-token"] = accessToken
@@ -85,9 +85,8 @@ def print_host_details (host, dnacAddress, accessToken):
             connected_interface = requests.get(url, headers=headers, verify=False)
             connected_interface = connected_interface.json()["response"]
 
-            print("This is Host not network device")
-            print("Device IP Address: {}".format(host['hostIp']))
-            print("Device Mac Address: {}".format(host['hostMac']))
+            print("Client IP Address: {}".format(host['hostIp']))
+            print("Client Mac Address: {}".format(host['hostMac']))
             print("Connected Type: {}".format(host['hostType']))
             print("Connected Device Hostname: {}".format(host['connectedNetworkDeviceName']))
             print("Connected Device IP Address: {}".format(host['connectedNetworkDeviceIpAddress']))
@@ -102,7 +101,18 @@ def print_host_details (host, dnacAddress, accessToken):
             print("Connected Device Interface Native VLAN ID: {}".format(connected_interface['nativeVlanId']))
 
         else:
-            print("Wireless")
+            print("Client IP Address: {}".format(host['hostIp']))
+            print("Client Mac Address: {}".format(host['hostMac']))
+            print("Client Device Type: {}".format(host['hostDeviceType']))
+            print("Connected Type: {}".format(host['hostType']))
+            print("Connected Access Point Hostname: {}".format(host['connectedAPName']))
+            print("Connected Access Point IP Address: {}".format(host['connectedNetworkDeviceIpAddress']))
+            print("Connected Access Point Mode: {}".format(host['connectedAPMode']))
+            print("Connected WLAN: {}".format(host['wlanNetworkName']))
+            print("Client Data Switching: {}".format(host['dataSwitchingMode']))
+            print("Access Point Series: {}".format(connected_device['series']))
+            print("Access Point Platform ID: {}".format(connected_device['platformId']))
+            print("WLC IP Address: {}".format(connected_device['apManagerInterfaceIp']))
 
     if 'role' in host.keys():
         print("Device Hostname: {}".format(host['hostname']))
@@ -133,35 +143,43 @@ def run_flow_analysis (dnacAddress, accessToken, source_ip, destination_ip):
         sys.exit(1)
 
     # Check status of analysis and wait until completed
-    flowAnalysisId = response.json()["response"]["flowAnalysisId"]
+    flowAnalysisId = response.json()['response']['flowAnalysisId']
+    print("Flow Analysis ID : {}".format(flowAnalysisId))
     detail_url = url + "/{}".format(flowAnalysisId)
     detail_response = requests.get(detail_url, headers=headers, verify=False)
-    while not detail_response.json()["response"]["request"]["status"] == "COMPLETED":  # noqa: E501
+    i = 0
+    while not detail_response.json()['response']['request']['status'] == "COMPLETED":  # noqa: E501
         print("Flow analysis not complete yet, waiting 5 seconds")
         sleep(5)
         detail_response = requests.get(detail_url, headers=headers,
                                        verify=False)
+        i += 1
+        if i == 3:
+            print("Flow analysis failed , Reason : {}".format(detail_response.json()['response']['request']['failureReason']))
+            sys.exit(1)
 
     # Return the flow analysis details
     return detail_response.json()["response"]
 
 def print_flow_analysis(dnacAddress, accessToken, flow_detail):
 
+    print()
+    print("************************")
     hops_number = flow_detail['networkElementsInfo']
     print("Total Hops number: {}".format(len(hops_number)))
-    print()
     print("---------------------------------")
     print("Flow Detail")
     for i, hop in enumerate(hops_number):
         print("************************")
         if 'name' not in hops_number[i].keys():
-            print("The First Hops is Host")
+            print("Hop 1: Host")
             print("Host IP: {}".format(hops_number[i]["ip"]))
             print("Host Type: {}".format(hops_number[i]["type"]))
 
         else:
             print("Hop {}: Network Device Name : {}".format(i+1, hops_number[i]["name"]))
             # If the hop is "UNKNOWN" continue along
+
             if hops_number[i]["name"] == "UNKNOWN":
                 print()
                 continue
@@ -174,30 +192,104 @@ def print_flow_analysis(dnacAddress, accessToken, flow_detail):
 
                 print()
 
-            ingress_url = "https://{}/api/v1/interface".format(dnacAddress)
-            headers["x-auth-token"] = accessToken
-            ingress_url += "/{}".format(hops_number[i]["ingressInterface"]["physicalInterface"]["id"])
-            ingress_interface = requests.get(ingress_url, headers=headers, verify=False)
-            ingress_interface = ingress_interface.json()["response"]
+            if 'ingressInterface' in hops_number[i].keys():
+                ingress_url = "https://{}/api/v1/interface".format(dnacAddress)
+                headers["x-auth-token"] = accessToken
+                ingress_url += "/{}".format(hops_number[i]["ingressInterface"]["physicalInterface"]["id"])
+                ingress_interface = requests.get(ingress_url, headers=headers, verify=False)
+                ingress_interface = ingress_interface.json()["response"]
 
-            print("Ingress Interface")
-            print("---------------------------------")
-            print(ingress_interface)
+                print("Device Series: {}".format(ingress_interface['series']))
+                print("Device PID: {}".format(ingress_interface['pid']))
+                print("Ingress Interface")
+                print("---------------------------------")
+                print("Port: {}".format(ingress_interface['portName']))
+                print("Port Mode: {}".format(ingress_interface['portMode']))
+                print("Port Description: {}".format(ingress_interface['description']))
+
+                if ingress_interface["portMode"] == "routed":
+                    print("Port IP Address: {}".format(ingress_interface['ipv4Address']))
+                    print("Subnet Mask: {}".format(ingress_interface['ipv4Mask']))
+                else:
+                    print("Vland ID: {}".format(ingress_interface['vlanId']))
+                    print("Native VLAN ID: {}".format(ingress_interface['nativeVlanId']))
+                    print("Voice VLAN: {}".format(ingress_interface['voiceVlan']))
+
+                print("Port Speed: {} Kbit/Sec".format(ingress_interface['speed']))
+                print("Duplex: {}".format(ingress_interface['duplex']))
+                print("Port Type: {}".format(ingress_interface['portType']))
+                print("Interface Type: {}".format(ingress_interface['interfaceType']))
+                print("Device Classname: {}".format(ingress_interface['className']))
+                print("Media Type: {}".format(ingress_interface['mediaType']))
+                print("---------------------------------")
+
+                if 'egressInterface' in hops_number[i].keys():
+                    egress_url = "https://{}/api/v1/interface".format(dnacAddress)
+                    headers["x-auth-token"] = accessToken
+                    egress_url += "/{}".format(hops_number[i]["egressInterface"]["physicalInterface"]["id"])
+                    egress_interface = requests.get(egress_url, headers=headers, verify=False)
+                    egress_interface = egress_interface.json()["response"]
+
+                    print("Egress Interface")
+                    print("---------------------------------")
+                    print("Port: {}".format(egress_interface['portName']))
+                    print("Port Mode: {}".format(egress_interface['portMode']))
+                    print("Port Description: {}".format(egress_interface['description']))
+
+                    if egress_interface["portMode"] == "routed":
+                        print("Port IP Address: {}".format(egress_interface['ipv4Address']))
+                        print("Subnet Mask: {}".format(egress_interface['ipv4Mask']))
+                    else:
+                        print("Vland ID: {}".format(egress_interface['vlanId']))
+                        print("Native VLAN ID: {}".format(egress_interface['nativeVlanId']))
+                        print("Voice VLAN: {}".format(egress_interface['voiceVlan']))
+
+                    print("Port Speed: {} Kbit/Sec".format(egress_interface['speed']))
+                    print("Duplex: {}".format(egress_interface['duplex']))
+                    print("Port Type: {}".format(egress_interface['portType']))
+                    print("Interface Type: {}".format(egress_interface['interfaceType']))
+                    print("Device Classname: {}".format(egress_interface['className']))
+                    print("Media Type: {}".format(egress_interface['mediaType']))
+                    print("---------------------------------")
+                    print("************************")
+                    print()
+                    continue
+
+                elif 'egressInterface' not in hops_number[i].keys():
+                    print("************************")
+                    print("Path Trace reach Destination device")
+                    print("************************")
 
             if 'egressInterface' in hops_number[i].keys():
                 egress_url = "https://{}/api/v1/interface".format(dnacAddress)
                 headers["x-auth-token"] = accessToken
                 egress_url += "/{}".format(hops_number[i]["egressInterface"]["physicalInterface"]["id"])
-                egress_interface = requests.get(ingress_url, headers=headers, verify=False)
+                egress_interface = requests.get(egress_url, headers=headers, verify=False)
                 egress_interface = egress_interface.json()["response"]
 
                 print("Egress Interface")
                 print("---------------------------------")
-                print(egress_interface)
+                print("Port: {}".format(egress_interface['portName']))
+                print("Port Mode: {}".format(egress_interface['portMode']))
+                print("Port Description: {}".format(egress_interface['description']))
 
+                if egress_interface["portMode"] == "routed":
+                    print("Port IP Address: {}".format(egress_interface['ipv4Address']))
+                    print("Subnet Mask: {}".format(egress_interface['ipv4Mask']))
+                else:
+                    print("Vland ID: {}".format(egress_interface['vlanId']))
+                    print("Native VLAN ID: {}".format(egress_interface['nativeVlanId']))
+                    print("Voice VLAN: {}".format(egress_interface['voiceVlan']))
+
+                print("Port Speed: {} Kbit/Sec".format(egress_interface['speed']))
+                print("Duplex: {}".format(egress_interface['duplex']))
+                print("Port Type: {}".format(egress_interface['portType']))
+                print("Interface Type: {}".format(egress_interface['interfaceType']))
+                print("Device Classname: {}".format(egress_interface['className']))
+                print("Media Type: {}".format(egress_interface['mediaType']))
+                print("---------------------------------")
+                print("************************")
                 print()
-            else:
-                print("Path Trace reach Destination device")
 
 # The Program Start here.
 if __name__ == '__main__':
@@ -219,7 +311,6 @@ if __name__ == '__main__':
         print("---------------------------------")
         print("Source Detail")
         print_source_detail = print_host_details(source_host_detail[0], dnac_ipAddress, token)
-        print("")
         print("---------------------------------")
         print("Destination Detail")
         destination_host_detail = host_detail(dnac_ipAddress, token, args.destination)
